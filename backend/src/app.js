@@ -7,6 +7,10 @@ const passport = require('passport');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 
+const connectDB = require('./config/db');
+const { validateEnvironment } = require('./config/env');
+const { configurePassport } = require('./config/passport');
+const { backfillQuizAccessCodes } = require('./services/quizAccess.service');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth.routes');
@@ -31,7 +35,10 @@ const isAllowedOrigin = (origin) => {
   if (!origin) return true;
 
   const normalizedOrigin = origin.replace(/\/$/, '');
-  if (configuredOrigins().includes(normalizedOrigin)) return true;
+
+  if (configuredOrigins().includes(normalizedOrigin)) {
+    return true;
+  }
 
   return (
     process.env.NODE_ENV !== 'production' &&
@@ -39,7 +46,29 @@ const isAllowedOrigin = (origin) => {
   );
 };
 
-const createApp = () => {
+let initializationPromise = null;
+
+const initializeForVercel = () => {
+  if (!initializationPromise) {
+    initializationPromise = (async () => {
+      validateEnvironment();
+      configurePassport();
+
+      if (mongoose.connection.readyState !== 1) {
+        await connectDB();
+      }
+
+      await backfillQuizAccessCodes();
+    })().catch((error) => {
+      initializationPromise = null;
+      throw error;
+    });
+  }
+
+  return initializationPromise;
+};
+
+const createApp = ({ initializeDatabase = false } = {}) => {
   const app = express();
 
   app.disable('x-powered-by');
@@ -53,7 +82,10 @@ const createApp = () => {
           return;
         }
 
-        const error = new Error(`CORS blocked request from origin: ${origin}`);
+        const error = new Error(
+          `CORS blocked request from origin: ${origin}`
+        );
+
         error.statusCode = 403;
         callback(error);
       },
@@ -63,9 +95,43 @@ const createApp = () => {
     })
   );
 
-  app.use(process.env.NODE_ENV === 'development' ? morgan('dev') : morgan('combined'));
+  /*
+   * Vercel does not run src/server.js in the same way as a normal
+   * long-running Node.js server. Therefore, initialize MongoDB and
+   * other backend services before processing the first request.
+   */
+  if (initializeDatabase) {
+    app.use(async (req, res, next) => {
+      try {
+        await initializeForVercel();
+        next();
+      } catch (error) {
+        console.error('Vercel backend initialization failed:', error);
+
+        const initializationError = new Error(
+          'Backend initialization failed. Check the Vercel runtime logs and environment variables.'
+        );
+
+        initializationError.statusCode = 503;
+        next(initializationError);
+      }
+    });
+  }
+
+  app.use(
+    process.env.NODE_ENV === 'development'
+      ? morgan('dev')
+      : morgan('combined')
+  );
+
   app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(
+    express.urlencoded({
+      extended: true,
+      limit: '10mb',
+    })
+  );
+
   app.use(cookieParser());
   app.use(passport.initialize());
 
@@ -80,10 +146,17 @@ const createApp = () => {
       message: 'Too many requests. Please try again later.',
     },
   });
+
   app.use('/api/', limiter);
 
   const healthResponse = (req, res) => {
-    const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+    const states = [
+      'disconnected',
+      'connected',
+      'connecting',
+      'disconnecting',
+    ];
+
     const readyState = mongoose.connection.readyState;
     const databaseConnected = readyState === 1;
 
@@ -102,6 +175,7 @@ const createApp = () => {
       health: '/api/health',
     });
   });
+
   app.get('/health', healthResponse);
   app.get('/api/health', healthResponse);
 
@@ -124,7 +198,24 @@ const createApp = () => {
   });
 
   app.use(errorHandler);
+
   return app;
 };
 
-module.exports = { createApp, isAllowedOrigin };
+/*
+ * Vercel needs the default export to be an Express application
+ * or another request-handling function.
+ */
+const vercelApp = createApp({
+  initializeDatabase: true,
+});
+
+module.exports = vercelApp;
+
+/*
+ * These properties preserve compatibility with src/server.js
+ * and any existing tests that import createApp.
+ */
+module.exports.createApp = createApp;
+module.exports.isAllowedOrigin = isAllowedOrigin;
+module.exports.initializeForVercel = initializeForVercel;
