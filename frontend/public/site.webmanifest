@@ -1,0 +1,13 @@
+{
+  "name": "LearnExa — Smart Assessment Platform",
+  "short_name": "LearnExa",
+  "description": "Create, attempt, evaluate, and understand assessments in one modern education workspace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f9fd",
+  "theme_color": "#2f6bff",
+  "icons": [
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
