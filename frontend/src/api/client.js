@@ -7,7 +7,7 @@ export const API_ORIGIN = (
 const api = axios.create({
   baseURL: `${API_ORIGIN}/api`,
   withCredentials: true,
-  timeout: 20000,
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
