@@ -1,8 +1,10 @@
 const axios = require('axios');
 
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-const FALLBACK_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
+const FALLBACK_GEMINI_MODELS = [
+  'gemini-2.5-flash'
+];
 const getGeminiModels = () => {
   const configuredModel = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   return [configuredModel, ...FALLBACK_GEMINI_MODELS].filter(
