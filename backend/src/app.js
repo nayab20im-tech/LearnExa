@@ -10,7 +10,6 @@ const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { validateEnvironment } = require('./config/env');
 const { configurePassport } = require('./config/passport');
-const { backfillQuizAccessCodes } = require('./services/quizAccess.service');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth.routes');
@@ -25,6 +24,12 @@ const analyticsRoutes = require('./routes/analytics.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const activityLogRoutes = require('./routes/activityLog.routes');
 
+/*
+ * CLIENT_URL can contain one URL or multiple comma-separated URLs.
+ *
+ * Example:
+ * CLIENT_URL=https://learn-exa-frontend.vercel.app,http://localhost:5173
+ */
 const configuredOrigins = () =>
   (process.env.CLIENT_URL || 'http://localhost:5173')
     .split(',')
@@ -32,7 +37,15 @@ const configuredOrigins = () =>
     .filter(Boolean);
 
 const isAllowedOrigin = (origin) => {
-  if (!origin) return true;
+  /*
+   * Requests without an Origin header include:
+   * - Direct browser visits
+   * - Postman requests
+   * - Server-to-server requests
+   */
+  if (!origin) {
+    return true;
+  }
 
   const normalizedOrigin = origin.replace(/\/$/, '');
 
@@ -40,24 +53,50 @@ const isAllowedOrigin = (origin) => {
     return true;
   }
 
+  /*
+   * Allow localhost only while not running in production.
+   */
   return (
     process.env.NODE_ENV !== 'production' &&
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin)
   );
 };
 
+/*
+ * This promise prevents multiple database connections from being
+ * created when several requests arrive at the same time.
+ */
 let initializationPromise = null;
 
 const initializeForVercel = () => {
   if (!initializationPromise) {
     initializationPromise = (async () => {
+      /*
+       * Validate the required environment variables.
+       */
       validateEnvironment();
+
+      /*
+       * Configure Google Passport authentication.
+       */
       configurePassport();
 
-     if (mongoose.connection.readyState !== 1) {
-  await connectDB();
-}
+      /*
+       * Connect to MongoDB only when not already connected.
+       *
+       * Mongoose ready states:
+       * 0 = disconnected
+       * 1 = connected
+       * 2 = connecting
+       * 3 = disconnecting
+       */
+      if (mongoose.connection.readyState !== 1) {
+        await connectDB();
+      }
     })().catch((error) => {
+      /*
+       * Reset the promise so another request can retry initialization.
+       */
       initializationPromise = null;
       throw error;
     });
@@ -70,8 +109,15 @@ const createApp = ({ initializeDatabase = false } = {}) => {
   const app = express();
 
   app.disable('x-powered-by');
+
+  /*
+   * Security headers.
+   */
   app.use(helmet());
 
+  /*
+   * Allow requests only from the configured frontend URL.
+   */
   app.use(
     cors({
       origin(origin, callback) {
@@ -87,16 +133,34 @@ const createApp = ({ initializeDatabase = false } = {}) => {
         error.statusCode = 403;
         callback(error);
       },
+
+      /*
+       * Required because authentication uses cookies.
+       */
       credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+
+      methods: [
+        'GET',
+        'POST',
+        'PUT',
+        'PATCH',
+        'DELETE',
+        'OPTIONS',
+      ],
+
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+      ],
     })
   );
 
   /*
-   * Vercel does not run src/server.js in the same way as a normal
-   * long-running Node.js server. Therefore, initialize MongoDB and
-   * other backend services before processing the first request.
+   * On Vercel, src/server.js does not run as a normal permanent
+   * Node.js server.
+   *
+   * Therefore, MongoDB and Passport are initialized before handling
+   * the incoming serverless request.
    */
   if (initializeDatabase) {
     app.use(async (req, res, next) => {
@@ -104,7 +168,10 @@ const createApp = ({ initializeDatabase = false } = {}) => {
         await initializeForVercel();
         next();
       } catch (error) {
-        console.error('Vercel backend initialization failed:', error);
+        console.error(
+          'Vercel backend initialization failed:',
+          error
+        );
 
         const initializationError = new Error(
           'Backend initialization failed. Check the Vercel runtime logs and environment variables.'
@@ -116,13 +183,24 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     });
   }
 
+  /*
+   * Request logging.
+   */
   app.use(
     process.env.NODE_ENV === 'development'
       ? morgan('dev')
       : morgan('combined')
   );
 
-  app.use(express.json({ limit: '10mb' }));
+  /*
+   * Request body parsers.
+   */
+  app.use(
+    express.json({
+      limit: '10mb',
+    })
+  );
+
   app.use(
     express.urlencoded({
       extended: true,
@@ -133,20 +211,36 @@ const createApp = ({ initializeDatabase = false } = {}) => {
   app.use(cookieParser());
   app.use(passport.initialize());
 
+  /*
+   * API rate limiter.
+   */
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === 'production' ? 300 : 1500,
+
+    max:
+      process.env.NODE_ENV === 'production'
+        ? 300
+        : 1500,
+
     standardHeaders: true,
     legacyHeaders: false,
+
+    /*
+     * Do not count browser CORS preflight requests.
+     */
     skip: (req) => req.method === 'OPTIONS',
+
     message: {
       success: false,
       message: 'Too many requests. Please try again later.',
     },
   });
 
-  app.use('/api/', limiter);
+  app.use('/api', limiter);
 
+  /*
+   * Health-check response.
+   */
   const healthResponse = (req, res) => {
     const states = [
       'disconnected',
@@ -158,14 +252,19 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     const readyState = mongoose.connection.readyState;
     const databaseConnected = readyState === 1;
 
-    res.status(databaseConnected ? 200 : 503).json({
-      success: databaseConnected,
-      service: 'LearnExa API',
-      database: states[readyState] || 'unknown',
-      timestamp: new Date().toISOString(),
-    });
+    res
+      .status(databaseConnected ? 200 : 503)
+      .json({
+        success: databaseConnected,
+        service: 'LearnExa API',
+        database: states[readyState] || 'unknown',
+        timestamp: new Date().toISOString(),
+      });
   };
 
+  /*
+   * Root route.
+   */
   app.get('/', (req, res) => {
     res.status(200).json({
       success: true,
@@ -174,9 +273,15 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     });
   });
 
+  /*
+   * Health routes.
+   */
   app.get('/health', healthResponse);
   app.get('/api/health', healthResponse);
 
+  /*
+   * Application API routes.
+   */
   app.use('/api/auth', authRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/profile', profileRoutes);
@@ -189,20 +294,29 @@ const createApp = ({ initializeDatabase = false } = {}) => {
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/activity', activityLogRoutes);
 
+  /*
+   * Handle unknown routes.
+   */
   app.use((req, res, next) => {
-    const error = new Error(`Not Found - ${req.originalUrl}`);
+    const error = new Error(
+      `Not Found - ${req.originalUrl}`
+    );
+
     error.statusCode = 404;
     next(error);
   });
 
+  /*
+   * Global error handler.
+   */
   app.use(errorHandler);
 
   return app;
 };
 
 /*
- * Vercel needs the default export to be an Express application
- * or another request-handling function.
+ * Vercel requires the default CommonJS export to be an Express
+ * application or request-handler function.
  */
 const vercelApp = createApp({
   initializeDatabase: true,
@@ -211,8 +325,7 @@ const vercelApp = createApp({
 module.exports = vercelApp;
 
 /*
- * These properties preserve compatibility with src/server.js
- * and any existing tests that import createApp.
+ * Preserve compatibility with src/server.js and automated tests.
  */
 module.exports.createApp = createApp;
 module.exports.isAllowedOrigin = isAllowedOrigin;
