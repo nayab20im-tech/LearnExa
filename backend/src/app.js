@@ -54,11 +54,9 @@ const initializeForVercel = () => {
       validateEnvironment();
       configurePassport();
 
-      if (mongoose.connection.readyState !== 1) {
-        await connectDB();
-      }
-
-      await backfillQuizAccessCodes();
+     if (mongoose.connection.readyState !== 1) {
+  await connectDB();
+}
     })().catch((error) => {
       initializationPromise = null;
       throw error;
