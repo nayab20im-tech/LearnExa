@@ -1,4 +1,8 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
+
 import {
   FaChartPie,
   FaClipboardCheck,
@@ -7,26 +11,44 @@ import {
   FaPlus,
   FaSignOutAlt,
   FaTrophy,
-  FaUsersCog
+  FaUsersCog,
 } from 'react-icons/fa';
+
 import api from '../api/client';
 import LogoIcon from './LogoIcon';
+
 import '../styles/Sidebar.css';
 
-const Sidebar = ({ systemRole, setSystemRole, setCurrentUser, onNavigate }) => {
+const Sidebar = ({
+  systemRole,
+  setSystemRole,
+  setCurrentUser,
+  onNavigate,
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const handleLogout = async () => {
     try {
-      await api.post('/auth/logout', {}, { withCredentials: true });
+      await api.post(
+        '/auth/logout',
+        {}
+      );
     } catch {
-      // Clear the local UI session even if the server is unavailable.
+      /*
+       * Clear the local session even if the backend
+       * is temporarily unavailable.
+       */
     } finally {
       setSystemRole('Public');
       setCurrentUser(null);
+
       localStorage.removeItem('user');
-      navigate('/');
+      localStorage.removeItem('token');
+
+      navigate('/', {
+        replace: true,
+      });
     }
   };
 
@@ -36,73 +58,164 @@ const Sidebar = ({ systemRole, setSystemRole, setCurrentUser, onNavigate }) => {
   };
 
   const items = [
-    { path: '/dashboard', icon: <FaHome />, label: 'Overview' },
+    {
+      path: '/dashboard',
+      icon: <FaHome />,
+      label: 'Overview',
+    },
+
     ...(systemRole === 'Student'
-      ? [{ path: '/leaderboard', icon: <FaTrophy />, label: 'Leaderboard' }]
+      ? [
+          {
+            path: '/leaderboard',
+            icon: <FaTrophy />,
+            label: 'Leaderboard',
+          },
+        ]
       : []),
+
     ...(systemRole === 'Teacher'
       ? [
-          { path: '/create-quiz', icon: <FaPlus />, label: 'Create quiz' },
-          { path: '/evaluations', icon: <FaClipboardCheck />, label: 'Evaluations' },
-          { path: '/proctoring', icon: <FaEye />, label: 'Live monitoring' }
+          {
+            path: '/create-quiz',
+            icon: <FaPlus />,
+            label: 'Create quiz',
+          },
+          {
+            path: '/evaluations',
+            icon: <FaClipboardCheck />,
+            label: 'Evaluations',
+          },
+          {
+            path: '/proctoring',
+            icon: <FaEye />,
+            label: 'Live monitoring',
+          },
         ]
       : []),
+
     ...(systemRole === 'Admin'
       ? [
-          { path: '/manage-users', icon: <FaUsersCog />, label: 'Manage users' },
-          { path: '/leaderboard', icon: <FaTrophy />, label: 'Leaderboard' }
+          {
+            path: '/manage-users',
+            icon: <FaUsersCog />,
+            label: 'Manage users',
+          },
+          {
+            path: '/leaderboard',
+            icon: <FaTrophy />,
+            label: 'Leaderboard',
+          },
         ]
-      : [])
+      : []),
   ];
 
   return (
     <div className="sidebar-container">
-      <button className="sidebar-logo" onClick={() => goTo('/dashboard')}>
-        <span className="logo-badge"><LogoIcon size={24} variant="white" /></span>
+      <button
+        type="button"
+        className="sidebar-logo"
+        onClick={() =>
+          goTo('/dashboard')
+        }
+      >
+        <span className="logo-badge">
+          <LogoIcon
+            size={24}
+            variant="white"
+          />
+        </span>
+
         <span className="logo-copy">
           <strong>LearnExa</strong>
-          <small>Quiz workspace</small>
+          <small>
+            Quiz workspace
+          </small>
         </span>
       </button>
 
       <div className="sidebar-role-pill">
         <FaChartPie />
-        <span>{systemRole} workspace</span>
+
+        <span>
+          {systemRole} workspace
+        </span>
       </div>
 
-      <nav className="sidebar-nav" aria-label="Main navigation">
-        <span className="sidebar-section-label">Menu</span>
+      <nav
+        className="sidebar-nav"
+        aria-label="Main navigation"
+      >
+        <span className="sidebar-section-label">
+          Menu
+        </span>
+
         {items.map((item) => {
-          const active = item.path === '/dashboard'
-            ? location.pathname === '/dashboard'
-            : location.pathname.startsWith(item.path);
+          const active =
+            item.path === '/dashboard'
+              ? location.pathname ===
+                '/dashboard'
+              : location.pathname.startsWith(
+                  item.path
+                );
 
           return (
             <button
+              type="button"
               key={item.path}
-              className={`sidebar-link ${active ? 'active' : ''}`}
-              onClick={() => goTo(item.path)}
+              className={`sidebar-link ${
+                active
+                  ? 'active'
+                  : ''
+              }`}
+              onClick={() =>
+                goTo(item.path)
+              }
             >
-              <span className="icon">{item.icon}</span>
-              <span>{item.label}</span>
-              {active && <span className="active-indicator" />}
+              <span className="icon">
+                {item.icon}
+              </span>
+
+              <span>
+                {item.label}
+              </span>
+
+              {active && (
+                <span className="active-indicator" />
+              )}
             </button>
           );
         })}
       </nav>
 
       <div className="sidebar-tip">
-        <span className="sidebar-tip-icon">✨</span>
+        <span className="sidebar-tip-icon">
+          ✨
+        </span>
+
         <div>
-          <strong>Smart workspace</strong>
-          <p>Use analytics to improve every assessment.</p>
+          <strong>
+            Smart workspace
+          </strong>
+
+          <p>
+            Use analytics to improve every
+            assessment.
+          </p>
         </div>
       </div>
 
       <div className="sidebar-footer">
-        <button className="logout-btn" onClick={handleLogout}>
+        <button
+          type="button"
+          className="logout-btn"
+          onClick={handleLogout}
+        >
           <FaSignOutAlt />
-          <span>Log out</span>
+
+          <span>
+            Log out
+          </span>
         </button>
       </div>
     </div>
