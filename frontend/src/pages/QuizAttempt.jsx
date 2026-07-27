@@ -62,10 +62,8 @@ const QuizAttempt = () => {
 
   const submissionStarted = useRef(false);
   const lockedRef = useRef(false);
-  const lastIncidentRef = useRef({
-    type: '',
-    at: 0
-  });
+  const lastIncidentRef = useRef({});
+  const likelyMinimizeRef = useRef(false);
   const teacherWarningSequenceRef = useRef(0);
 
   const applySessionState = useCallback(
@@ -336,38 +334,36 @@ const QuizAttempt = () => {
       }
 
       const now = Date.now();
-      const previous = lastIncidentRef.current;
+      const previousAt = Number(
+        lastIncidentRef.current[eventType] || 0
+      );
 
-      if (
-        previous.type === eventType &&
-        now - previous.at < 1200
-      ) {
+      if (now - previousAt < 1600) {
         return;
       }
 
-      if (
-        eventType === 'focus_loss' &&
-        now - previous.at < 1200
-      ) {
-        return;
-      }
-
-      lastIncidentRef.current = {
-        type: eventType,
-        at: now
-      };
+      lastIncidentRef.current[eventType] = now;
 
       try {
+        const token = localStorage.getItem('token');
+
         const response = await fetch(
           `${API_ORIGIN}/api/activity/update`,
           {
             method: 'PUT',
             credentials: 'include',
-            keepalive:
-              eventType === 'focus_loss',
+            keepalive: [
+              'tab_switch',
+              'window_minimize',
+              'focus_loss'
+            ].includes(eventType),
             headers: {
-              'Content-Type':
-                'application/json'
+              'Content-Type': 'application/json',
+              ...(token
+                ? {
+                    Authorization: `Bearer ${token}`
+                  }
+                : {})
             },
             body: JSON.stringify({
               quizId,
@@ -392,7 +388,7 @@ const QuizAttempt = () => {
         if (!response.ok) {
           throw new Error(
             data.message ||
-              'Unable to record proctoring activity.'
+              `Unable to record proctoring activity. Status: ${response.status}`
           );
         }
 
@@ -401,28 +397,25 @@ const QuizAttempt = () => {
         if (data.action === 'warning') {
           setWarningDialog({
             type: 'automatic',
-            title:
-              'Automatic integrity warning',
+            title: 'Automatic integrity warning',
             message:
-              'This is your first recorded violation. Stay on the quiz screen and do not copy assessment content. A second violation will lock the quiz until your teacher restores it.'
+              data.message ||
+              `${incidentLabel} was detected. A second violation will lock the quiz until your teacher restores it.`
           });
         }
 
         if (data.action === 'locked') {
           lockedRef.current = true;
-
           setIsLocked(true);
-
           setLockReason(
             data.log?.lockReason ||
               incidentLabel
           );
-
           setWarningDialog(null);
         }
       } catch (requestError) {
         console.error(
-          'Unable to record proctoring incident',
+          'Unable to record proctoring incident:',
           requestError
         );
       }
@@ -447,13 +440,40 @@ const QuizAttempt = () => {
 
     let blurTimer;
 
+    const browserLooksMinimized = () =>
+      document.hidden &&
+      (
+        window.outerWidth <= 160 ||
+        window.outerHeight <= 160 ||
+        window.screenX <= -30000 ||
+        window.screenY <= -30000
+      );
+
     const recordHiddenWindow = () => {
-      if (document.hidden) {
-        reportIncident(
-          'focus_loss',
-          'Quiz tab changed or the browser window was minimized'
-        );
+      if (!document.hidden || lockedRef.current) {
+        return;
       }
+
+      window.clearTimeout(blurTimer);
+
+      const minimized =
+        likelyMinimizeRef.current ||
+        browserLooksMinimized();
+
+      likelyMinimizeRef.current = false;
+
+      if (minimized) {
+        reportIncident(
+          'window_minimize',
+          'Browser window was minimized'
+        );
+        return;
+      }
+
+      reportIncident(
+        'tab_switch',
+        'Quiz tab was switched or hidden'
+      );
     };
 
     const recordWindowBlur = () => {
@@ -466,15 +486,41 @@ const QuizAttempt = () => {
         ) {
           reportIncident(
             'focus_loss',
-            'Quiz window lost focus'
+            'Quiz window lost focus to another window or application'
           );
         }
-      }, 250);
+      }, 500);
+    };
+
+    const recordWindowResize = () => {
+      if (browserLooksMinimized()) {
+        likelyMinimizeRef.current = true;
+      }
+    };
+
+    const recordKeyboardShortcut = (event) => {
+      const key = String(event.key || '').toLowerCase();
+
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        ['tab', 'pageup', 'pagedown'].includes(key)
+      ) {
+        reportIncident(
+          'tab_switch',
+          'A keyboard shortcut was used to switch browser tabs'
+        );
+      }
+
+      if (event.altKey && key === 'tab') {
+        reportIncident(
+          'focus_loss',
+          'An application-switch shortcut was used'
+        );
+      }
     };
 
     const preventCopy = (event) => {
       event.preventDefault();
-
       reportIncident(
         'copy_attempt',
         'Copying text from the quiz was attempted'
@@ -483,7 +529,6 @@ const QuizAttempt = () => {
 
     const preventCut = (event) => {
       event.preventDefault();
-
       reportIncident(
         'cut_attempt',
         'Cutting text from the quiz was attempted'
@@ -492,7 +537,6 @@ const QuizAttempt = () => {
 
     const preventContextMenu = (event) => {
       event.preventDefault();
-
       reportIncident(
         'context_menu',
         'The context menu was opened inside the quiz'
@@ -503,22 +547,27 @@ const QuizAttempt = () => {
       'visibilitychange',
       recordHiddenWindow
     );
-
     window.addEventListener(
       'blur',
       recordWindowBlur
     );
-
+    window.addEventListener(
+      'resize',
+      recordWindowResize
+    );
+    document.addEventListener(
+      'keydown',
+      recordKeyboardShortcut,
+      true
+    );
     document.addEventListener(
       'copy',
       preventCopy
     );
-
     document.addEventListener(
       'cut',
       preventCut
     );
-
     document.addEventListener(
       'contextmenu',
       preventContextMenu
@@ -531,22 +580,27 @@ const QuizAttempt = () => {
         'visibilitychange',
         recordHiddenWindow
       );
-
       window.removeEventListener(
         'blur',
         recordWindowBlur
       );
-
+      window.removeEventListener(
+        'resize',
+        recordWindowResize
+      );
+      document.removeEventListener(
+        'keydown',
+        recordKeyboardShortcut,
+        true
+      );
       document.removeEventListener(
         'copy',
         preventCopy
       );
-
       document.removeEventListener(
         'cut',
         preventCut
       );
-
       document.removeEventListener(
         'contextmenu',
         preventContextMenu
@@ -603,7 +657,7 @@ const QuizAttempt = () => {
     const interval =
       window.setInterval(
         syncStatus,
-        2500
+        5000
       );
 
     return () =>
@@ -642,7 +696,7 @@ const QuizAttempt = () => {
     const interval =
       window.setInterval(
         heartbeat,
-        8000
+        10000
       );
 
     return () =>
