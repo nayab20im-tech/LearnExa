@@ -24,12 +24,6 @@ const analyticsRoutes = require('./routes/analytics.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const activityLogRoutes = require('./routes/activityLog.routes');
 
-/*
- * CLIENT_URL can contain one URL or multiple comma-separated URLs.
- *
- * Example:
- * CLIENT_URL=https://learn-exa-frontend.vercel.app,http://localhost:5173
- */
 const configuredOrigins = () =>
   (process.env.CLIENT_URL || 'http://localhost:5173')
     .split(',')
@@ -37,12 +31,6 @@ const configuredOrigins = () =>
     .filter(Boolean);
 
 const isAllowedOrigin = (origin) => {
-  /*
-   * Requests without an Origin header include:
-   * - Direct browser visits
-   * - Postman requests
-   * - Server-to-server requests
-   */
   if (!origin) {
     return true;
   }
@@ -53,50 +41,26 @@ const isAllowedOrigin = (origin) => {
     return true;
   }
 
-  /*
-   * Allow localhost only while not running in production.
-   */
   return (
     process.env.NODE_ENV !== 'production' &&
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin)
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(
+      normalizedOrigin
+    )
   );
 };
 
-/*
- * This promise prevents multiple database connections from being
- * created when several requests arrive at the same time.
- */
 let initializationPromise = null;
 
 const initializeForVercel = () => {
   if (!initializationPromise) {
     initializationPromise = (async () => {
-      /*
-       * Validate the required environment variables.
-       */
       validateEnvironment();
-
-      /*
-       * Configure Google Passport authentication.
-       */
       configurePassport();
 
-      /*
-       * Connect to MongoDB only when not already connected.
-       *
-       * Mongoose ready states:
-       * 0 = disconnected
-       * 1 = connected
-       * 2 = connecting
-       * 3 = disconnecting
-       */
       if (mongoose.connection.readyState !== 1) {
         await connectDB();
       }
     })().catch((error) => {
-      /*
-       * Reset the promise so another request can retry initialization.
-       */
       initializationPromise = null;
       throw error;
     });
@@ -110,14 +74,11 @@ const createApp = ({ initializeDatabase = false } = {}) => {
 
   app.disable('x-powered-by');
 
-  /*
-   * Security headers.
-   */
+  // Required so req.ip uses Vercel's forwarded client address.
+  app.set('trust proxy', 1);
+
   app.use(helmet());
 
-  /*
-   * Allow requests only from the configured frontend URL.
-   */
   app.use(
     cors({
       origin(origin, callback) {
@@ -133,12 +94,7 @@ const createApp = ({ initializeDatabase = false } = {}) => {
         error.statusCode = 403;
         callback(error);
       },
-
-      /*
-       * Required because authentication uses cookies.
-       */
       credentials: true,
-
       methods: [
         'GET',
         'POST',
@@ -147,7 +103,6 @@ const createApp = ({ initializeDatabase = false } = {}) => {
         'DELETE',
         'OPTIONS',
       ],
-
       allowedHeaders: [
         'Content-Type',
         'Authorization',
@@ -155,13 +110,6 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     })
   );
 
-  /*
-   * On Vercel, src/server.js does not run as a normal permanent
-   * Node.js server.
-   *
-   * Therefore, MongoDB and Passport are initialized before handling
-   * the incoming serverless request.
-   */
   if (initializeDatabase) {
     app.use(async (req, res, next) => {
       try {
@@ -183,18 +131,12 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     });
   }
 
-  /*
-   * Request logging.
-   */
   app.use(
     process.env.NODE_ENV === 'development'
       ? morgan('dev')
       : morgan('combined')
   );
 
-  /*
-   * Request body parsers.
-   */
   app.use(
     express.json({
       limit: '10mb',
@@ -212,35 +154,44 @@ const createApp = ({ initializeDatabase = false } = {}) => {
   app.use(passport.initialize());
 
   /*
-   * API rate limiter.
+   * Live proctoring uses frequent student heartbeats/status polls and
+   * teacher monitoring polls. It receives a dedicated higher limit.
    */
-  const limiter = rateLimit({
+  const proctoringLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-
-    max:
-      process.env.NODE_ENV === 'production'
-        ? 300
-        : 1500,
-
+    max: process.env.NODE_ENV === 'production' ? 5000 : 10000,
     standardHeaders: true,
     legacyHeaders: false,
-
-    /*
-     * Do not count browser CORS preflight requests.
-     */
     skip: (req) => req.method === 'OPTIONS',
-
     message: {
       success: false,
-      message: 'Too many requests. Please try again later.',
+      message:
+        'Live monitoring received too many requests. Please wait briefly and try again.',
     },
   });
 
-  app.use('/api', limiter);
-
   /*
-   * Health-check response.
+   * General API limiter. Activity routes are skipped because they are
+   * already protected by proctoringLimiter above.
    */
+  const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: process.env.NODE_ENV === 'production' ? 500 : 2000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) =>
+      req.method === 'OPTIONS' ||
+      req.path.startsWith('/activity'),
+    message: {
+      success: false,
+      message:
+        'Too many requests. Please wait and try again.',
+    },
+  });
+
+  app.use('/api/activity', proctoringLimiter);
+  app.use('/api', generalLimiter);
+
   const healthResponse = (req, res) => {
     const states = [
       'disconnected',
@@ -262,9 +213,6 @@ const createApp = ({ initializeDatabase = false } = {}) => {
       });
   };
 
-  /*
-   * Root route.
-   */
   app.get('/', (req, res) => {
     res.status(200).json({
       success: true,
@@ -273,15 +221,9 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     });
   });
 
-  /*
-   * Health routes.
-   */
   app.get('/health', healthResponse);
   app.get('/api/health', healthResponse);
 
-  /*
-   * Application API routes.
-   */
   app.use('/api/auth', authRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/profile', profileRoutes);
@@ -294,9 +236,6 @@ const createApp = ({ initializeDatabase = false } = {}) => {
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/activity', activityLogRoutes);
 
-  /*
-   * Handle unknown routes.
-   */
   app.use((req, res, next) => {
     const error = new Error(
       `Not Found - ${req.originalUrl}`
@@ -306,27 +245,16 @@ const createApp = ({ initializeDatabase = false } = {}) => {
     next(error);
   });
 
-  /*
-   * Global error handler.
-   */
   app.use(errorHandler);
 
   return app;
 };
 
-/*
- * Vercel requires the default CommonJS export to be an Express
- * application or request-handler function.
- */
 const vercelApp = createApp({
   initializeDatabase: true,
 });
 
 module.exports = vercelApp;
-
-/*
- * Preserve compatibility with src/server.js and automated tests.
- */
 module.exports.createApp = createApp;
 module.exports.isAllowedOrigin = isAllowedOrigin;
 module.exports.initializeForVercel = initializeForVercel;
