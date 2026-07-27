@@ -2,11 +2,31 @@ const ActivityLog = require('../models/ActivityLog.model');
 const Submission = require('../models/Submission.model');
 const Quiz = require('../models/Quiz.model');
 
-const INCIDENT_LABELS = {
-  focus_loss: 'Quiz tab changed, browser minimized, or quiz window lost focus',
-  copy_attempt: 'Copying quiz content was attempted',
-  cut_attempt: 'Cutting quiz content was attempted',
-  context_menu: 'Context menu was opened inside the quiz',
+const INCIDENTS = {
+  tab_switch: {
+    label: 'Quiz tab was switched or hidden',
+    warning: 'Tab switching was detected. Stay on the quiz tab.',
+  },
+  window_minimize: {
+    label: 'Browser window was minimized',
+    warning: 'Browser minimization was detected. Keep the quiz window visible.',
+  },
+  focus_loss: {
+    label: 'Quiz window lost focus',
+    warning: 'The quiz window lost focus. Do not open another application or window.',
+  },
+  copy_attempt: {
+    label: 'Copying quiz content was attempted',
+    warning: 'A copy attempt was detected. Copying quiz content is not allowed.',
+  },
+  cut_attempt: {
+    label: 'Cutting quiz content was attempted',
+    warning: 'A cut attempt was detected. Modifying or extracting quiz content is not allowed.',
+  },
+  context_menu: {
+    label: 'Context menu was opened inside the quiz',
+    warning: 'Opening the context menu was detected. Right-click actions are disabled during the quiz.',
+  },
 };
 
 const normalizeMessage = (value, fallback) => {
@@ -155,8 +175,9 @@ const updateQuizSession = async (req, res, next) => {
       });
     }
 
-    if (INCIDENT_LABELS[eventType]) {
-      const label = normalizeMessage(incidentLabel, INCIDENT_LABELS[eventType]);
+    if (INCIDENTS[eventType]) {
+      const incident = INCIDENTS[eventType];
+      const label = normalizeMessage(incidentLabel, incident.label);
       const recordedAt = new Date();
 
       log.violationCount = (Number(log.violationCount) || 0) + 1;
@@ -167,29 +188,40 @@ const updateQuizSession = async (req, res, next) => {
       log.lockCount = Number(log.lockCount) || 0;
       log.lastHeartbeat = recordedAt;
 
-      if (eventType === 'focus_loss') {
-        log.focusLossCount += 1;
-        log.tabSwitchCount = log.focusLossCount;
+      if (eventType === 'tab_switch') {
+        log.tabSwitchCount += 1;
       }
-      if (eventType === 'copy_attempt' || eventType === 'cut_attempt' || eventType === 'context_menu') {
+
+      if (eventType === 'focus_loss' || eventType === 'window_minimize') {
+        log.focusLossCount += 1;
+      }
+
+      if (
+        eventType === 'copy_attempt' ||
+        eventType === 'cut_attempt' ||
+        eventType === 'context_menu'
+      ) {
         log.copyAttemptCount += 1;
       }
 
-      log.suspiciousActivity.push(`${label} · ${recordedAt.toISOString()}`);
+      log.suspiciousActivity.push(
+        `${label} · ${recordedAt.toISOString()}`
+      );
+
       // Keep the document bounded during long sessions.
       if (log.suspiciousActivity.length > 100) {
         log.suspiciousActivity = log.suspiciousActivity.slice(-100);
       }
 
       let action = 'warning';
-      let message = 'Automatic warning: remain on the quiz and do not copy assessment content.';
+      let message = `${incident.warning} This is violation ${log.violationCount}. A second violation locks the quiz.`;
 
       if (log.violationCount === 1) {
         log.monitoringStatus = 'warning';
-        log.currentActivity = `Automatic warning issued: ${label}`;
+        log.currentActivity = `Warning: ${label}`;
       } else {
         action = 'locked';
-        message = 'Quiz access has been locked after a second integrity violation.';
+        message = `Quiz locked because: ${label}. Only the teacher can restore access.`;
         log.isLocked = true;
         log.lockCount += 1;
         log.lockReason = label;
