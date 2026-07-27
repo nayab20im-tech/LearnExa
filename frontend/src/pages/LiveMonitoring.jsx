@@ -85,7 +85,7 @@ const LiveMonitoring = () => {
 
   useEffect(() => {
     const initial = window.setTimeout(fetchLiveStats, 0);
-    const interval = window.setInterval(fetchLiveStats, 3000);
+    const interval = window.setInterval(fetchLiveStats, 5000);
 
     return () => {
       window.clearTimeout(initial);
