@@ -1,6 +1,17 @@
 import { useState } from 'react';
-import { Alert, Button, Form, Spinner } from 'react-bootstrap';
-import { useLocation, useNavigate } from 'react-router-dom';
+
+import {
+  Alert,
+  Button,
+  Form,
+  Spinner,
+} from 'react-bootstrap';
+
+import {
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
+
 import {
   FaArrowLeft,
   FaEnvelope,
@@ -8,38 +19,74 @@ import {
   FaEyeSlash,
   FaGoogle,
   FaLock,
-  FaLongArrowAltRight
+  FaLongArrowAltRight,
 } from 'react-icons/fa';
-import api, { getApiErrorMessage, getGoogleAuthUrl } from '../api/client';
+
+import api, {
+  getApiErrorMessage,
+  getGoogleAuthUrl,
+} from '../api/client';
+
 import AuthVisual from '../components/AuthVisual';
 import LogoIcon from '../components/LogoIcon';
+
 import '../styles/Auth.css';
 
-const LoginPage = ({ onAuthenticated }) => {
+const LoginPage = ({
+  onAuthenticated,
+}) => {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [password, setPassword] =
+    useState('');
+  const [
+    showPassword,
+    setShowPassword,
+  ] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
+
   const navigate = useNavigate();
   const location = useLocation();
-  const selectedRole = location.state?.role || 'Student';
+
+  const selectedRole =
+    location.state?.role || 'Student';
 
   const handleLogin = async (event) => {
     event.preventDefault();
+
     setError('');
     setLoading(true);
 
     try {
       const { data } = await api.post(
         '/auth/login',
-        { email, password },
-        { withCredentials: true }
+        {
+          email,
+          password,
+        }
       );
 
       if (data.success) {
+        /*
+         * Store the JWT returned by the backend.
+         * It will be sent automatically by the Axios interceptor.
+         */
+        if (data.token) {
+          localStorage.setItem(
+            'token',
+            data.token
+          );
+        }
+
         onAuthenticated(data.user);
-        navigate('/dashboard', { replace: true });
+
+        navigate(
+          '/dashboard',
+          {
+            replace: true,
+          }
+        );
       }
     } catch (requestError) {
       setError(
@@ -53,6 +100,12 @@ const LoginPage = ({ onAuthenticated }) => {
     }
   };
 
+  const handleGoogleLogin = () => {
+    window.location.assign(
+      getGoogleAuthUrl()
+    );
+  };
+
   return (
     <main className="auth-page">
       <div className="auth-shell">
@@ -63,40 +116,71 @@ const LoginPage = ({ onAuthenticated }) => {
         <section className="auth-form-column">
           <div className="auth-mobile-brand">
             <LogoIcon size={38} />
+
             <div>
               <strong>LearnExa</strong>
-              <span>Learn · Explore · Excel</span>
+              <span>
+                Learn · Explore · Excel
+              </span>
             </div>
           </div>
 
-          <button className="back-button" type="button" onClick={() => navigate('/')}>
+          <button
+            className="back-button"
+            type="button"
+            onClick={() => navigate('/')}
+          >
             <FaArrowLeft />
             Back to home
           </button>
 
           <div className="form-container login-form-container">
             <div className="form-header">
-              <span className="auth-role-label">{selectedRole} workspace</span>
-              <h2>Sign in to LearnExa</h2>
-              <p>Access your assessments, progress, feedback, and latest updates.</p>
+              <span className="auth-role-label">
+                {selectedRole} workspace
+              </span>
+
+              <h2>
+                Sign in to LearnExa
+              </h2>
+
+              <p>
+                Access your assessments,
+                progress, feedback, and latest
+                updates.
+              </p>
             </div>
 
             {error && (
-              <Alert variant="danger" className="error-alert">
+              <Alert
+                variant="danger"
+                className="error-alert"
+              >
                 {error}
               </Alert>
             )}
 
-            <Form onSubmit={handleLogin} className="login-form">
+            <Form
+              onSubmit={handleLogin}
+              className="login-form"
+            >
               <Form.Group className="auth-field">
-                <Form.Label>Email address</Form.Label>
+                <Form.Label>
+                  Email address
+                </Form.Label>
+
                 <div className="input-group-custom">
                   <FaEnvelope className="input-icon" />
+
                   <Form.Control
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(event) => setEmail(event.target.value)}
+                    onChange={(event) =>
+                      setEmail(
+                        event.target.value
+                      )
+                    }
                     required
                     autoComplete="email"
                   />
@@ -105,27 +189,52 @@ const LoginPage = ({ onAuthenticated }) => {
 
               <Form.Group className="auth-field">
                 <div className="auth-label-row">
-                  <Form.Label>Password</Form.Label>
-                  <span>Minimum 6 characters</span>
+                  <Form.Label>
+                    Password
+                  </Form.Label>
+
+                  <span>
+                    Minimum 6 characters
+                  </span>
                 </div>
 
                 <div className="input-group-custom">
                   <FaLock className="input-icon" />
+
                   <Form.Control
-                    type={showPassword ? 'text' : 'password'}
+                    type={
+                      showPassword
+                        ? 'text'
+                        : 'password'
+                    }
                     placeholder="Enter your password"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) =>
+                      setPassword(
+                        event.target.value
+                      )
+                    }
                     required
                     autoComplete="current-password"
                   />
+
                   <button
                     type="button"
                     className="toggle-password"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() =>
+                      setShowPassword(
+                        (visible) => !visible
+                      )
+                    }
+                    aria-label={
+                      showPassword
+                        ? 'Hide password'
+                        : 'Show password'
+                    }
                   >
-                    {showPassword ? <FaEyeSlash /> : <FaEye />}
+                    {showPassword
+                      ? <FaEyeSlash />
+                      : <FaEye />}
                   </button>
                 </div>
               </Form.Group>
@@ -135,13 +244,24 @@ const LoginPage = ({ onAuthenticated }) => {
                   <input type="checkbox" />
                   Remember me
                 </label>
-                <span>Secure student and educator access</span>
+
+                <span>
+                  Secure student and educator
+                  access
+                </span>
               </div>
 
-              <Button type="submit" className="btn-login" disabled={loading}>
+              <Button
+                type="submit"
+                className="btn-login"
+                disabled={loading}
+              >
                 {loading ? (
                   <>
-                    <Spinner animation="border" size="sm" />
+                    <Spinner
+                      animation="border"
+                      size="sm"
+                    />
                     Signing in...
                   </>
                 ) : (
@@ -154,14 +274,15 @@ const LoginPage = ({ onAuthenticated }) => {
             </Form>
 
             <div className="divider">
-              <span>or continue with</span>
+              <span>
+                or continue with
+              </span>
             </div>
 
             <Button
+              type="button"
               className="btn-google"
-              onClick={() => {
-                window.location.href = getGoogleAuthUrl();
-              }}
+              onClick={handleGoogleLogin}
               disabled={loading}
             >
               <FaGoogle />
@@ -170,13 +291,21 @@ const LoginPage = ({ onAuthenticated }) => {
 
             <div className="signup-link">
               New to LearnExa?{' '}
-              <button type="button" onClick={() => navigate('/register')}>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate('/register')
+                }
+              >
                 Create an account
               </button>
             </div>
 
             <p className="auth-privacy-note">
-              Secure sign-in with role-based access and protected learning data.
+              Secure sign-in with role-based
+              access and protected learning
+              data.
             </p>
           </div>
         </section>
